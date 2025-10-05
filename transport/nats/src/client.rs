@@ -1,6 +1,7 @@
 //! NATS client for event publishing
 
 use async_nats::Client;
+use futures_util::StreamExt;
 use tracing::{error, info};
 use crate::config::NatsConfig;
 use watchtower_core::{Event, WatchtowerError};
@@ -91,5 +92,91 @@ impl NatsClient {
     /// Get the underlying NATS client
     pub fn client(&self) -> &Client {
         &self.client
+    }
+
+    /// Publish event to Dead Letter Queue
+    pub async fn publish_to_dlq(
+        &self,
+        event: &Event,
+        error: &WatchtowerError,
+    ) -> Result<(), WatchtowerError> {
+        let dlq_subject = format!("dlq.{}", event.event_type());
+
+        // Create DLQ message with error information
+        let dlq_payload = serde_json::json!({
+            "event": event,
+            "error": error.to_string(),
+            "original_subject": event.event_type(),
+        });
+
+        let payload = serde_json::to_vec(&dlq_payload)
+            .map_err(WatchtowerError::SerializationError)?;
+
+        self.client
+            .publish(dlq_subject.clone(), payload.into())
+            .await
+            .map_err(|e| {
+                error!(
+                    subject = %dlq_subject,
+                    event_id = %event.id(),
+                    error = %e,
+                    "Failed to publish event to DLQ"
+                );
+                WatchtowerError::NatsError(format!("DLQ publish failed: {}", e))
+            })?;
+
+        info!(
+            subject = %dlq_subject,
+            event_id = %event.id(),
+            event_type = %event.event_type(),
+            "Event published to Dead Letter Queue"
+        );
+
+        Ok(())
+    }
+
+    /// Subscribe to Dead Letter Queue
+    pub async fn subscribe_dlq(
+        &self,
+        callback: watchtower_core::subscriber::EventCallback,
+    ) -> Result<(), WatchtowerError> {
+        let dlq_subject = "dlq.*";
+
+        let mut subscriber = self.client
+            .subscribe(dlq_subject.to_string())
+            .await
+            .map_err(|e| WatchtowerError::NatsError(format!("DLQ subscription failed: {}", e)))?;
+
+        info!(subject = %dlq_subject, "Started consuming from Dead Letter Queue");
+
+        tokio::spawn(async move {
+            while let Some(message) = subscriber.next().await {
+                match serde_json::from_slice::<serde_json::Value>(&message.payload) {
+                    Ok(dlq_message) => {
+                        if let Some(event_value) = dlq_message.get("event") {
+                            match serde_json::from_value::<Event>(event_value.clone()) {
+                                Ok(event) => {
+                                    if let Err(e) = callback(event.clone()).await {
+                                        error!(
+                                            event_id = %event.id(),
+                                            error = %e,
+                                            "DLQ callback execution failed"
+                                        );
+                                    }
+                                }
+                                Err(e) => {
+                                    error!(error = %e, "Failed to deserialize event from DLQ");
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!(error = %e, "Failed to deserialize DLQ message");
+                    }
+                }
+            }
+        });
+
+        Ok(())
     }
 }

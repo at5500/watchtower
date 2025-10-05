@@ -2,6 +2,7 @@
 
 use crate::event::Event;
 use crate::errors::WatchtowerError;
+use crate::subscriber::EventCallback;
 use async_trait::async_trait;
 
 /// Transport metadata
@@ -45,6 +46,22 @@ pub trait Transport: Send + Sync {
     /// Gracefully shutdown the transport
     async fn shutdown(&self) -> Result<(), WatchtowerError> {
         Ok(())
+    }
+
+    /// Publish event to Dead Letter Queue
+    /// Called when event fails to publish after all retries
+    async fn publish_to_dlq(&self, _event: Event, _error: &WatchtowerError) -> Result<(), WatchtowerError> {
+        Err(WatchtowerError::InternalError(
+            format!("{} does not support DLQ", self.info().name)
+        ))
+    }
+
+    /// Consume events from Dead Letter Queue
+    /// Allows processing or reprocessing failed events
+    async fn consume_dlq(&self, _callback: EventCallback) -> Result<(), WatchtowerError> {
+        Err(WatchtowerError::InternalError(
+            format!("{} does not support DLQ", self.info().name)
+        ))
     }
 }
 

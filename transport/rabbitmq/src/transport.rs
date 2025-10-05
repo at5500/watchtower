@@ -307,4 +307,141 @@ impl Transport for RabbitMQTransport {
 
         Ok(())
     }
+
+    async fn publish_to_dlq(&self, event: Event, error: &WatchtowerError) -> Result<(), WatchtowerError> {
+        let dlx = self.config.dead_letter_exchange.as_ref()
+            .ok_or_else(|| WatchtowerError::InternalError(
+                "Dead letter exchange not configured".to_string()
+            ))?;
+
+        let routing_key = format!("dlq.{}", event.event_type());
+        let payload = serde_json::to_vec(&event)
+            .map_err(WatchtowerError::SerializationError)?;
+
+        let mut properties = self.build_properties(&event);
+        // Add error information to headers
+        let mut headers = FieldTable::default();
+        headers.insert("x-error".into(), lapin::types::AMQPValue::LongString(error.to_string().into()));
+        headers.insert("x-original-routing-key".into(), lapin::types::AMQPValue::LongString(event.event_type().into()));
+        properties = properties.with_headers(headers);
+
+        self.channel
+            .basic_publish(
+                dlx,
+                &routing_key,
+                BasicPublishOptions::default(),
+                &payload,
+                properties,
+            )
+            .await
+            .map_err(|e| {
+                WatchtowerError::PublicationError(format!("Failed to publish to DLQ: {}", e))
+            })?
+            .await
+            .map_err(|e| {
+                WatchtowerError::PublicationError(format!("Failed to confirm DLQ publish: {}", e))
+            })?;
+
+        info!(
+            event_id = %event.id(),
+            event_type = %event.event_type(),
+            dlx = %dlx,
+            "Event published to Dead Letter Queue"
+        );
+
+        Ok(())
+    }
+
+    async fn consume_dlq(&self, callback: watchtower_core::subscriber::EventCallback) -> Result<(), WatchtowerError> {
+        use futures_util::stream::StreamExt;
+
+        let dlx = self.config.dead_letter_exchange.as_ref()
+            .ok_or_else(|| WatchtowerError::InternalError(
+                "Dead letter exchange not configured".to_string()
+            ))?;
+
+        let dlq_queue = format!("{}.dlq", self.config.queue_prefix);
+
+        // Declare DLQ queue
+        self.channel
+            .queue_declare(
+                &dlq_queue,
+                QueueDeclareOptions {
+                    durable: self.config.durable,
+                    ..Default::default()
+                },
+                FieldTable::default(),
+            )
+            .await
+            .map_err(|e| {
+                WatchtowerError::SubscriptionError(format!("DLQ queue declaration failed: {}", e))
+            })?;
+
+        // Bind DLQ queue to dead letter exchange
+        self.channel
+            .queue_bind(
+                &dlq_queue,
+                dlx,
+                "dlq.*",
+                QueueBindOptions::default(),
+                FieldTable::default(),
+            )
+            .await
+            .map_err(|e| {
+                WatchtowerError::SubscriptionError(format!("DLQ queue bind failed: {}", e))
+            })?;
+
+        // Create consumer for DLQ
+        let mut consumer = self.channel
+            .basic_consume(
+                &dlq_queue,
+                "dlq-consumer",
+                BasicConsumeOptions::default(),
+                FieldTable::default(),
+            )
+            .await
+            .map_err(|e| {
+                WatchtowerError::SubscriptionError(format!("DLQ consumer creation failed: {}", e))
+            })?;
+
+        info!(queue = %dlq_queue, "Started consuming from Dead Letter Queue");
+
+        tokio::spawn(async move {
+            while let Some(delivery_result) = consumer.next().await {
+                match delivery_result {
+                    Ok(delivery) => {
+                        match serde_json::from_slice::<Event>(&delivery.data) {
+                            Ok(event) => {
+                                if let Err(e) = callback(event.clone()).await {
+                                    error!(
+                                        event_id = %event.id(),
+                                        error = %e,
+                                        "DLQ callback execution failed"
+                                    );
+                                    let _ = delivery.nack(BasicNackOptions {
+                                        requeue: true,
+                                        ..Default::default()
+                                    }).await;
+                                } else {
+                                    let _ = delivery.ack(BasicAckOptions::default()).await;
+                                }
+                            }
+                            Err(e) => {
+                                error!(error = %e, "Failed to deserialize event from DLQ");
+                                let _ = delivery.nack(BasicNackOptions {
+                                    requeue: false,
+                                    ..Default::default()
+                                }).await;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!(error = %e, "DLQ consumer error");
+                    }
+                }
+            }
+        });
+
+        Ok(())
+    }
 }

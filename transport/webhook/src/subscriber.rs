@@ -78,6 +78,16 @@ impl WebhookSubscriber {
     pub async fn backpressure_stats(&self) -> watchtower_core::BackpressureStats {
         self.backpressure.stats().await
     }
+
+    /// Publish event to Dead Letter Queue
+    pub async fn publish_to_dlq(&self, event: Event, error: &WatchtowerError) -> Result<(), WatchtowerError> {
+        self.client.publish_to_dlq(event, error).await
+    }
+
+    /// Consume events from Dead Letter Queue
+    pub async fn consume_dlq(&self, callback: EventCallback) -> Result<(), WatchtowerError> {
+        self.client.consume_dlq(callback).await
+    }
 }
 
 #[async_trait]

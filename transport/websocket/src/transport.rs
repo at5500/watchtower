@@ -2,6 +2,7 @@
 
 use async_trait::async_trait;
 use futures_util::{stream::SplitStream, SinkExt, StreamExt};
+use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio::sync::{Mutex, RwLock};
@@ -18,12 +19,20 @@ type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type WsWriter = futures_util::stream::SplitSink<WsStream, Message>;
 type WsReader = SplitStream<WsStream>;
 
+/// Dead Letter Queue entry
+#[derive(Clone)]
+struct DlqEntry {
+    event: Event,
+    error: String,
+}
+
 /// WebSocket transport
 pub struct WebSocketTransport {
     pub(crate) config: WebSocketConfig,
     writer: Arc<Mutex<Option<WsWriter>>>,
     pub(crate) reader: Arc<Mutex<Option<WsReader>>>,
     backpressure: BackpressureController,
+    dlq: Arc<Mutex<VecDeque<DlqEntry>>>,
 }
 
 impl WebSocketTransport {
@@ -40,6 +49,7 @@ impl WebSocketTransport {
             writer: Arc::new(Mutex::new(None)),
             reader: Arc::new(Mutex::new(None)),
             backpressure,
+            dlq: Arc::new(Mutex::new(VecDeque::new())),
         };
 
         transport.connect().await?;
@@ -233,6 +243,64 @@ impl Transport for WebSocketTransport {
                 warn!(error = %e, "Failed to close WebSocket connection gracefully");
             }
         }
+
+        Ok(())
+    }
+
+    async fn publish_to_dlq(&self, event: Event, error: &WatchtowerError) -> Result<(), WatchtowerError> {
+        let mut dlq = self.dlq.lock().await;
+
+        dlq.push_back(DlqEntry {
+            event: event.clone(),
+            error: error.to_string(),
+        });
+
+        // Limit DLQ size to prevent memory overflow
+        const MAX_DLQ_SIZE: usize = 10000;
+        while dlq.len() > MAX_DLQ_SIZE {
+            dlq.pop_front();
+        }
+
+        info!(
+            event_id = %event.id(),
+            event_type = %event.event_type(),
+            dlq_size = dlq.len(),
+            "Event added to Dead Letter Queue (in-memory)"
+        );
+
+        Ok(())
+    }
+
+    async fn consume_dlq(&self, callback: watchtower_core::subscriber::EventCallback) -> Result<(), WatchtowerError> {
+        let dlq = self.dlq.clone();
+
+        info!("Started consuming from Dead Letter Queue (in-memory)");
+
+        tokio::spawn(async move {
+            loop {
+                let entry = {
+                    let mut queue = dlq.lock().await;
+                    queue.pop_front()
+                };
+
+                if let Some(dlq_entry) = entry {
+                    if let Err(e) = callback(dlq_entry.event.clone()).await {
+                        error!(
+                            event_id = %dlq_entry.event.id(),
+                            error = %e,
+                            "DLQ callback execution failed, re-queuing"
+                        );
+
+                        // Re-queue failed event
+                        let mut queue = dlq.lock().await;
+                        queue.push_back(dlq_entry);
+                    }
+                } else {
+                    // No items in queue, wait before checking again
+                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                }
+            }
+        });
 
         Ok(())
     }

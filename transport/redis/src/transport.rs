@@ -153,4 +153,134 @@ impl Transport for RedisTransport {
         info!("Shutting down Redis transport");
         Ok(())
     }
+
+    async fn publish_to_dlq(&self, event: Event, error: &WatchtowerError) -> Result<(), WatchtowerError> {
+        let dlq_stream = format!("{}:dlq", self.config.stream_prefix);
+
+        let payload = serde_json::to_string(&event)
+            .map_err(WatchtowerError::SerializationError)?;
+
+        let mut conn = self.connection.clone();
+
+        let items = &[
+            ("event", payload.as_str()),
+            ("error", &error.to_string()),
+            ("original_type", event.event_type()),
+        ];
+
+        // Add to DLQ stream with max length
+        let result: Result<String, redis::RedisError> = if self.config.max_stream_length > 0 {
+            conn.xadd_maxlen(
+                &dlq_stream,
+                StreamMaxlen::Approx(self.config.max_stream_length),
+                "*",
+                items,
+            )
+            .await
+        } else {
+            conn.xadd(&dlq_stream, "*", items).await
+        };
+
+        result.map_err(|e| {
+            error!(
+                stream = %dlq_stream,
+                event_id = %event.id(),
+                error = %e,
+                "Failed to publish to DLQ stream"
+            );
+            WatchtowerError::PublicationError(format!("Redis DLQ XADD failed: {}", e))
+        })?;
+
+        info!(
+            stream = %dlq_stream,
+            event_id = %event.id(),
+            event_type = %event.event_type(),
+            "Event published to Dead Letter Queue"
+        );
+
+        Ok(())
+    }
+
+    async fn consume_dlq(&self, callback: watchtower_core::subscriber::EventCallback) -> Result<(), WatchtowerError> {
+        use redis::streams::StreamReadOptions;
+
+        let dlq_stream = format!("{}:dlq", self.config.stream_prefix);
+        let dlq_group = format!("{}_dlq", self.config.consumer_group);
+
+        // Create DLQ consumer group
+        let mut conn = self.connection.clone();
+        let _: Result<(), redis::RedisError> = conn
+            .xgroup_create_mkstream(&dlq_stream, &dlq_group, "0")
+            .await;
+
+        info!(
+            stream = %dlq_stream,
+            group = %dlq_group,
+            "Started consuming from Dead Letter Queue"
+        );
+
+        tokio::spawn(async move {
+            loop {
+                let opts = StreamReadOptions::default()
+                    .group(&dlq_group, &format!("{}_dlq_consumer", &dlq_group))
+                    .count(10)
+                    .block(1000);
+
+                let result: Result<redis::streams::StreamReadReply, redis::RedisError> =
+                    conn.xread_options(&[&dlq_stream], &[">"], &opts).await;
+
+                match result {
+                    Ok(stream_reply) => {
+                        for stream_key in stream_reply.keys {
+                            for stream_id in stream_key.ids {
+                                if let Some(event_data) = stream_id.map.get("event") {
+                                    let event_result = match event_data {
+                                        redis::Value::BulkString(bytes) => {
+                                            serde_json::from_slice::<Event>(bytes.as_slice())
+                                        }
+                                        redis::Value::VerbatimString { format: _, text } => {
+                                            serde_json::from_slice::<Event>(text.as_bytes())
+                                        }
+                                        _ => {
+                                            error!("Unexpected Redis value type for DLQ event data");
+                                            continue;
+                                        }
+                                    };
+
+                                    match event_result {
+                                        Ok(event) => {
+                                            if let Err(e) = callback(event.clone()).await {
+                                                error!(
+                                                    event_id = %event.id(),
+                                                    error = %e,
+                                                    "DLQ callback execution failed"
+                                                );
+                                            }
+
+                                            // Acknowledge DLQ message
+                                            let _: Result<(), redis::RedisError> = conn
+                                                .xack(&stream_key.key, &dlq_group, &[&stream_id.id])
+                                                .await;
+                                        }
+                                        Err(e) => {
+                                            error!(
+                                                error = %e,
+                                                "Failed to deserialize event from DLQ stream"
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!(error = %e, "Failed to read from DLQ stream");
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                    }
+                }
+            }
+        });
+
+        Ok(())
+    }
 }

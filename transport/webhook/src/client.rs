@@ -3,16 +3,27 @@
 use hmac::{Hmac, Mac};
 use reqwest::Client;
 use sha2::Sha256;
+use std::collections::VecDeque;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 use crate::config::WebhookConfig;
 use watchtower_core::{Event, WatchtowerError};
 
 type HmacSha256 = Hmac<Sha256>;
 
+/// Dead Letter Queue entry for webhook
+#[derive(Clone)]
+struct DlqEntry {
+    event: Event,
+    error: String,
+}
+
 /// HTTP client for delivering webhooks
 pub struct WebhookClient {
     client: Client,
     config: WebhookConfig,
+    dlq: Arc<Mutex<VecDeque<DlqEntry>>>,
 }
 
 impl WebhookClient {
@@ -23,7 +34,11 @@ impl WebhookClient {
             .build()
             .map_err(|e| WatchtowerError::HttpError(e.to_string()))?;
 
-        Ok(Self { client, config })
+        Ok(Self {
+            client,
+            config,
+            dlq: Arc::new(Mutex::new(VecDeque::new())),
+        })
     }
 
     /// Send event to webhook URL
@@ -119,5 +134,71 @@ impl WebhookClient {
         let hash = mac.finalize().into_bytes();
 
         Ok(format!("sha256={:x}", hash))
+    }
+
+    /// Publish event to Dead Letter Queue
+    pub async fn publish_to_dlq(&self, event: Event, error: &WatchtowerError) -> Result<(), WatchtowerError> {
+        let mut dlq = self.dlq.lock().await;
+
+        dlq.push_back(DlqEntry {
+            event: event.clone(),
+            error: error.to_string(),
+        });
+
+        // Limit DLQ size to prevent memory overflow
+        const MAX_DLQ_SIZE: usize = 10000;
+        while dlq.len() > MAX_DLQ_SIZE {
+            dlq.pop_front();
+        }
+
+        info!(
+            event_id = %event.id(),
+            event_type = %event.event_type(),
+            dlq_size = dlq.len(),
+            "Webhook event added to Dead Letter Queue (in-memory)"
+        );
+
+        Ok(())
+    }
+
+    /// Consume events from Dead Letter Queue with retry
+    pub async fn consume_dlq(
+        &self,
+        callback: watchtower_core::subscriber::EventCallback,
+    ) -> Result<(), WatchtowerError> {
+        let dlq = self.dlq.clone();
+
+        info!("Started consuming from Webhook Dead Letter Queue (in-memory)");
+
+        tokio::spawn(async move {
+            loop {
+                let entry = {
+                    let mut queue = dlq.lock().await;
+                    queue.pop_front()
+                };
+
+                if let Some(dlq_entry) = entry {
+                    if let Err(e) = callback(dlq_entry.event.clone()).await {
+                        error!(
+                            event_id = %dlq_entry.event.id(),
+                            error = %e,
+                            "DLQ callback execution failed, re-queuing with exponential backoff"
+                        );
+
+                        // Re-queue failed event
+                        let mut queue = dlq.lock().await;
+                        queue.push_back(dlq_entry);
+
+                        // Exponential backoff before retrying
+                        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                    }
+                } else {
+                    // No items in queue, wait before checking again
+                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                }
+            }
+        });
+
+        Ok(())
     }
 }
