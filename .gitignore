@@ -1,0 +1,95 @@
+# Rust / Cargo
+target/
+debug/
+**/*.rs.bk
+*.pdb
+# Note: Cargo.lock is kept for workspace projects
+
+# Mutants testing
+**/mutants.out*/
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# Windows
+*.tmp
+*.temp
+Desktop.ini
+$RECYCLE.BIN/
+
+# Docker
+.dockerignore
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Backup files
+*.bak
+*.backup
+*.orig
+
+# Editor config
+.editorconfig
+
+# Coverage reports
+coverage/
+tarpaulin-report.html
+cobertura.xml
+lcov.info
+
+# Flamegraph
+flamegraph.svg
+perf.data*
+
+# Binary files
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Documentation build
+book/
+mdbook/
+docs/_book/
+
+# Temporary files
+tmp/
+temp/
+
+# Project-specific
+# Redis dump files
+dump.rdb
+
+# Docker volumes
+*_data/

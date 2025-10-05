@@ -1,0 +1,31 @@
+[package]
+name = "watchtower"
+version = "0.1.0"
+edition = "2024"
+description = "A modular notification system library for webhooks and NATS"
+license = "MIT"
+keywords = ["notifications", "webhooks", "nats", "events", "pubsub"]
+categories = ["web-programming", "network-programming"]
+
+[workspace]
+resolver = "3"
+members = [
+    "core",
+    "transport/webhook",
+    "transport/nats",
+    "transport/redis",
+    "transport/rabbitmq",
+    "transport/websocket",
+    "unified",
+    "config"
+]
+
+[dependencies]
+watchtower-core = { path = "./core" }
+watchtower-webhook = { path = "./transport/webhook" }
+watchtower-nats = { path = "./transport/nats" }
+watchtower-redis = { path = "./transport/redis" }
+watchtower-rabbitmq = { path = "./transport/rabbitmq" }
+watchtower-websocket = { path = "./transport/websocket" }
+watchtower-unified = { path = "./unified" }
+watchtower-config = { path = "./config" }

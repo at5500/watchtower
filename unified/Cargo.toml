@@ -1,0 +1,15 @@
+[package]
+name = "watchtower-unified"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+watchtower-core = { path = "../core" }
+watchtower-config = { path = "../config" }
+watchtower-webhook = { path = "../transport/webhook" }
+watchtower-nats = { path = "../transport/nats" }
+watchtower-redis = { path = "../transport/redis" }
+watchtower-rabbitmq = { path = "../transport/rabbitmq" }
+watchtower-websocket = { path = "../transport/websocket" }
+async-trait = "0.1"
+tokio = { version = "1.0", features = ["sync"] }
