@@ -3,12 +3,12 @@
 use hmac::{Hmac, Mac};
 use reqwest::Client;
 use sha2::Sha256;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 use crate::config::WebhookConfig;
-use watchtower_core::{Event, WatchtowerError};
+use watchtower_core::{CircuitBreaker, CircuitBreakerConfig, Event, WatchtowerError};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -24,6 +24,7 @@ pub struct WebhookClient {
     client: Client,
     config: WebhookConfig,
     dlq: Arc<Mutex<VecDeque<DlqEntry>>>,
+    circuit_breakers: Arc<Mutex<HashMap<String, Arc<CircuitBreaker>>>>,
 }
 
 impl WebhookClient {
@@ -38,7 +39,21 @@ impl WebhookClient {
             client,
             config,
             dlq: Arc::new(Mutex::new(VecDeque::new())),
+            circuit_breakers: Arc::new(Mutex::new(HashMap::new())),
         })
+    }
+
+    /// Get or create circuit breaker for URL
+    async fn get_circuit_breaker(&self, url: &str) -> Arc<CircuitBreaker> {
+        let mut breakers = self.circuit_breakers.lock().await;
+
+        if let Some(breaker) = breakers.get(url) {
+            return breaker.clone();
+        }
+
+        let breaker = Arc::new(CircuitBreaker::new(CircuitBreakerConfig::default()));
+        breakers.insert(url.to_string(), breaker.clone());
+        breaker
     }
 
     /// Send event to webhook URL
@@ -48,6 +63,21 @@ impl WebhookClient {
         event: &Event,
         secret: Option<&str>,
     ) -> Result<(), WatchtowerError> {
+        let circuit_breaker = self.get_circuit_breaker(url).await;
+
+        // Check circuit breaker
+        if !circuit_breaker.should_allow_request().await {
+            let stats = circuit_breaker.stats().await;
+            warn!(
+                url = %url,
+                state = ?stats.state,
+                "Circuit breaker is open, rejecting request"
+            );
+            return Err(WatchtowerError::HttpError(
+                "Circuit breaker is open".to_string()
+            ));
+        }
+
         let json_payload =
             serde_json::to_string(event).map_err(WatchtowerError::SerializationError)?;
 
@@ -76,6 +106,7 @@ impl WebhookClient {
                             attempt = attempt,
                             "Webhook delivered successfully"
                         );
+                        circuit_breaker.record_success().await;
                         return Ok(());
                     } else {
                         let body = response
@@ -93,6 +124,7 @@ impl WebhookClient {
                         );
 
                         if attempt == self.config.retry_attempts {
+                            circuit_breaker.record_failure().await;
                             return Err(WatchtowerError::HttpError(format!(
                                 "Webhook delivery failed: status {}, body: {}",
                                 status, body
@@ -110,6 +142,7 @@ impl WebhookClient {
                     );
 
                     if attempt == self.config.retry_attempts {
+                        circuit_breaker.record_failure().await;
                         return Err(WatchtowerError::HttpError(err.to_string()));
                     }
                 }
@@ -200,5 +233,25 @@ impl WebhookClient {
         });
 
         Ok(())
+    }
+
+    /// Get circuit breaker statistics for a URL
+    pub async fn circuit_breaker_stats(&self, url: &str) -> Option<watchtower_core::CircuitBreakerStats> {
+        let breakers = self.circuit_breakers.lock().await;
+        if let Some(breaker) = breakers.get(url) {
+            Some(breaker.stats().await)
+        } else {
+            None
+        }
+    }
+
+    /// Get all circuit breaker statistics
+    pub async fn all_circuit_breaker_stats(&self) -> Vec<(String, watchtower_core::CircuitBreakerStats)> {
+        let breakers = self.circuit_breakers.lock().await;
+        let mut stats = Vec::new();
+        for (url, breaker) in breakers.iter() {
+            stats.push((url.clone(), breaker.stats().await));
+        }
+        stats
     }
 }
