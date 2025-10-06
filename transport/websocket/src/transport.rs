@@ -11,7 +11,7 @@ use tracing::{error, info, warn};
 
 use crate::config::WebSocketConfig;
 use watchtower_core::{
-    BackpressureController, Event, Transport, TransportInfo, TransportSubscription,
+    BackpressureController, CircuitBreaker, CircuitBreakerConfig, Event, Transport, TransportInfo, TransportSubscription,
     WatchtowerError,
 };
 
@@ -33,6 +33,7 @@ pub struct WebSocketTransport {
     pub(crate) reader: Arc<Mutex<Option<WsReader>>>,
     backpressure: BackpressureController,
     dlq: Arc<Mutex<VecDeque<DlqEntry>>>,
+    circuit_breaker: Arc<CircuitBreaker>,
 }
 
 impl WebSocketTransport {
@@ -44,12 +45,15 @@ impl WebSocketTransport {
             config.backpressure.warning_threshold,
         );
 
+        let circuit_breaker = Arc::new(CircuitBreaker::new(CircuitBreakerConfig::default()));
+
         let mut transport = Self {
             config,
             writer: Arc::new(Mutex::new(None)),
             reader: Arc::new(Mutex::new(None)),
             backpressure,
             dlq: Arc::new(Mutex::new(VecDeque::new())),
+            circuit_breaker,
         };
 
         transport.connect().await?;
@@ -59,6 +63,19 @@ impl WebSocketTransport {
 
     /// Connect to WebSocket server
     async fn connect(&mut self) -> Result<(), WatchtowerError> {
+        // Check circuit breaker
+        if !self.circuit_breaker.should_allow_request().await {
+            let stats = self.circuit_breaker.stats().await;
+            warn!(
+                url = %self.config.url,
+                state = ?stats.state,
+                "Circuit breaker is open, rejecting connection attempt"
+            );
+            return Err(WatchtowerError::ConnectionError(
+                "Circuit breaker is open".to_string(),
+            ));
+        }
+
         let mut retry_count = 0;
 
         loop {
@@ -72,11 +89,13 @@ impl WebSocketTransport {
                     *self.writer.lock().await = Some(write);
                     *self.reader.lock().await = Some(read);
 
+                    self.circuit_breaker.record_success().await;
                     return Ok(());
                 }
                 Err(e) => {
                     retry_count += 1;
                     if self.config.retry_attempts > 0 && retry_count >= self.config.retry_attempts {
+                        self.circuit_breaker.record_failure().await;
                         return Err(WatchtowerError::ConnectionError(format!(
                             "WebSocket connection failed after {} attempts: {}",
                             retry_count, e
@@ -142,6 +161,11 @@ impl WebSocketTransport {
     /// Get backpressure statistics
     pub async fn backpressure_stats(&self) -> watchtower_core::BackpressureStats {
         self.backpressure.stats().await
+    }
+
+    /// Get circuit breaker statistics
+    pub async fn circuit_breaker_stats(&self) -> watchtower_core::CircuitBreakerStats {
+        self.circuit_breaker.stats().await
     }
 }
 

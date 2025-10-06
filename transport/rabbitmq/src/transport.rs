@@ -10,9 +10,10 @@ use tracing::{error, info, warn};
 
 use crate::config::{ExchangeType, RabbitMQConfig};
 use watchtower_core::{
-    BackpressureController, Event, Transport, TransportInfo, TransportSubscription,
+    BackpressureController, CircuitBreaker, CircuitBreakerConfig, Event, Transport, TransportInfo, TransportSubscription,
     WatchtowerError,
 };
+use std::sync::Arc;
 
 /// RabbitMQ transport
 pub struct RabbitMQTransport {
@@ -20,6 +21,7 @@ pub struct RabbitMQTransport {
     channel: Channel,
     pub(crate) config: RabbitMQConfig,
     backpressure: BackpressureController,
+    circuit_breaker: Arc<CircuitBreaker>,
 }
 
 impl RabbitMQTransport {
@@ -113,11 +115,14 @@ impl RabbitMQTransport {
             "Connected to RabbitMQ"
         );
 
+        let circuit_breaker = Arc::new(CircuitBreaker::new(CircuitBreakerConfig::default()));
+
         Ok(Self {
             connection,
             channel,
             config,
             backpressure,
+            circuit_breaker,
         })
     }
 
@@ -129,6 +134,11 @@ impl RabbitMQTransport {
     /// Get backpressure statistics
     pub async fn backpressure_stats(&self) -> watchtower_core::BackpressureStats {
         self.backpressure.stats().await
+    }
+
+    /// Get circuit breaker statistics
+    pub async fn circuit_breaker_stats(&self) -> watchtower_core::CircuitBreakerStats {
+        self.circuit_breaker.stats().await
     }
 
     /// Build message properties
@@ -159,6 +169,19 @@ impl Transport for RabbitMQTransport {
     }
 
     async fn publish(&self, event: Event) -> Result<(), WatchtowerError> {
+        // Check circuit breaker
+        if !self.circuit_breaker.should_allow_request().await {
+            let stats = self.circuit_breaker.stats().await;
+            warn!(
+                exchange = %self.config.exchange,
+                state = ?stats.state,
+                "Circuit breaker is open, rejecting publish request"
+            );
+            return Err(WatchtowerError::PublicationError(
+                "Circuit breaker is open".to_string(),
+            ));
+        }
+
         // Apply backpressure
         self.backpressure.send(event.clone()).await?;
 
@@ -171,7 +194,7 @@ impl Transport for RabbitMQTransport {
 
             let properties = self.build_properties(&queued_event);
 
-            self.channel
+            match self.channel
                 .basic_publish(
                     &self.config.exchange,
                     &routing_key,
@@ -180,7 +203,37 @@ impl Transport for RabbitMQTransport {
                     properties,
                 )
                 .await
-                .map_err(|e| {
+            {
+                Ok(confirm) => {
+                    match confirm.await {
+                        Ok(_) => {
+                            self.circuit_breaker.record_success().await;
+                            info!(
+                                exchange = %self.config.exchange,
+                                routing_key = %routing_key,
+                                event_id = %queued_event.id(),
+                                event_type = %queued_event.event_type(),
+                                "Event published to RabbitMQ"
+                            );
+                        }
+                        Err(e) => {
+                            self.circuit_breaker.record_failure().await;
+                            error!(
+                                exchange = %self.config.exchange,
+                                routing_key = %routing_key,
+                                event_id = %queued_event.id(),
+                                error = %e,
+                                "Failed to confirm RabbitMQ publish"
+                            );
+                            return Err(WatchtowerError::PublicationError(format!(
+                                "RabbitMQ publish confirmation failed: {}",
+                                e
+                            )));
+                        }
+                    }
+                }
+                Err(e) => {
+                    self.circuit_breaker.record_failure().await;
                     error!(
                         exchange = %self.config.exchange,
                         routing_key = %routing_key,
@@ -188,30 +241,9 @@ impl Transport for RabbitMQTransport {
                         error = %e,
                         "Failed to publish to RabbitMQ"
                     );
-                    WatchtowerError::PublicationError(format!("RabbitMQ publish failed: {}", e))
-                })?
-                .await
-                .map_err(|e| {
-                    error!(
-                        exchange = %self.config.exchange,
-                        routing_key = %routing_key,
-                        event_id = %queued_event.id(),
-                        error = %e,
-                        "Failed to confirm RabbitMQ publish"
-                    );
-                    WatchtowerError::PublicationError(format!(
-                        "RabbitMQ publish confirmation failed: {}",
-                        e
-                    ))
-                })?;
-
-            info!(
-                exchange = %self.config.exchange,
-                routing_key = %routing_key,
-                event_id = %queued_event.id(),
-                event_type = %queued_event.event_type(),
-                "Event published to RabbitMQ"
-            );
+                    return Err(WatchtowerError::PublicationError(format!("RabbitMQ publish failed: {}", e)));
+                }
+            }
         }
 
         Ok(())

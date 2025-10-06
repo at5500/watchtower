@@ -2,14 +2,16 @@
 
 use async_nats::Client;
 use futures_util::StreamExt;
-use tracing::{error, info};
+use std::sync::Arc;
+use tracing::{error, info, warn};
 use crate::config::NatsConfig;
-use watchtower_core::{Event, WatchtowerError};
+use watchtower_core::{CircuitBreaker, CircuitBreakerConfig, Event, WatchtowerError};
 
 /// NATS client for publishing events
 pub struct NatsClient {
     client: Client,
     config: NatsConfig,
+    circuit_breaker: Arc<CircuitBreaker>,
 }
 
 impl NatsClient {
@@ -21,7 +23,9 @@ impl NatsClient {
 
         info!(url = %config.url, "Connected to NATS server");
 
-        Ok(Self { client, config })
+        let circuit_breaker = Arc::new(CircuitBreaker::new(CircuitBreakerConfig::default()));
+
+        Ok(Self { client, config, circuit_breaker })
     }
 
     /// Publish event to a NATS subject
@@ -30,30 +34,47 @@ impl NatsClient {
         subject: &str,
         event: &Event,
     ) -> Result<(), WatchtowerError> {
+        // Check circuit breaker
+        if !self.circuit_breaker.should_allow_request().await {
+            let stats = self.circuit_breaker.stats().await;
+            warn!(
+                subject = %subject,
+                state = ?stats.state,
+                "Circuit breaker is open, rejecting publish request"
+            );
+            return Err(WatchtowerError::NatsError(
+                "Circuit breaker is open".to_string(),
+            ));
+        }
+
         let payload = serde_json::to_vec(event)
             .map_err(WatchtowerError::SerializationError)?;
 
-        self.client
+        match self.client
             .publish(subject.to_string(), payload.into())
             .await
-            .map_err(|e| {
+        {
+            Ok(_) => {
+                self.circuit_breaker.record_success().await;
+                info!(
+                    subject = %subject,
+                    event_id = %event.id(),
+                    event_type = %event.event_type(),
+                    "Event published to NATS"
+                );
+                Ok(())
+            }
+            Err(e) => {
+                self.circuit_breaker.record_failure().await;
                 error!(
                     subject = %subject,
                     event_id = %event.id(),
                     error = %e,
                     "Failed to publish event to NATS"
                 );
-                WatchtowerError::NatsError(format!("Publish failed: {}", e))
-            })?;
-
-        info!(
-            subject = %subject,
-            event_id = %event.id(),
-            event_type = %event.event_type(),
-            "Event published to NATS"
-        );
-
-        Ok(())
+                Err(WatchtowerError::NatsError(format!("Publish failed: {}", e)))
+            }
+        }
     }
 
     /// Publish event with retry logic
@@ -92,6 +113,11 @@ impl NatsClient {
     /// Get the underlying NATS client
     pub fn client(&self) -> &Client {
         &self.client
+    }
+
+    /// Get circuit breaker statistics
+    pub async fn circuit_breaker_stats(&self) -> watchtower_core::CircuitBreakerStats {
+        self.circuit_breaker.stats().await
     }
 
     /// Publish event to Dead Letter Queue

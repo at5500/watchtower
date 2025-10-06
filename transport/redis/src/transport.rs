@@ -3,10 +3,11 @@
 use async_trait::async_trait;
 use redis::streams::StreamMaxlen;
 use redis::{aio::MultiplexedConnection, AsyncCommands, Client};
-use tracing::{error, info};
+use std::sync::Arc;
+use tracing::{error, info, warn};
 use crate::config::RedisConfig;
 use watchtower_core::{
-    BackpressureController, Event, Transport, TransportInfo,
+    BackpressureController, CircuitBreaker, CircuitBreakerConfig, Event, Transport, TransportInfo,
     TransportSubscription, WatchtowerError,
 };
 
@@ -15,6 +16,7 @@ pub struct RedisTransport {
     pub(crate) connection: MultiplexedConnection,
     pub(crate) config: RedisConfig,
     backpressure: BackpressureController,
+    circuit_breaker: Arc<CircuitBreaker>,
 }
 
 impl RedisTransport {
@@ -38,10 +40,13 @@ impl RedisTransport {
 
         info!(url = %config.url, "Connected to Redis");
 
+        let circuit_breaker = Arc::new(CircuitBreaker::new(CircuitBreakerConfig::default()));
+
         Ok(Self {
             connection,
             config,
             backpressure,
+            circuit_breaker,
         })
     }
 
@@ -53,6 +58,11 @@ impl RedisTransport {
     /// Get backpressure statistics
     pub async fn backpressure_stats(&self) -> watchtower_core::BackpressureStats {
         self.backpressure.stats().await
+    }
+
+    /// Get circuit breaker statistics
+    pub async fn circuit_breaker_stats(&self) -> watchtower_core::CircuitBreakerStats {
+        self.circuit_breaker.stats().await
     }
 }
 
@@ -68,6 +78,19 @@ impl Transport for RedisTransport {
     }
 
     async fn publish(&self, event: Event) -> Result<(), WatchtowerError> {
+        // Check circuit breaker
+        if !self.circuit_breaker.should_allow_request().await {
+            let stats = self.circuit_breaker.stats().await;
+            warn!(
+                stream_prefix = %self.config.stream_prefix,
+                state = ?stats.state,
+                "Circuit breaker is open, rejecting publish request"
+            );
+            return Err(WatchtowerError::PublicationError(
+                "Circuit breaker is open".to_string(),
+            ));
+        }
+
         // Apply backpressure
         self.backpressure.send(event.clone()).await?;
 
@@ -95,22 +118,27 @@ impl Transport for RedisTransport {
                 conn.xadd(&stream_key, "*", items).await
             };
 
-            result.map_err(|e| {
-                error!(
-                    stream = %stream_key,
-                    event_id = %queued_event.id(),
-                    error = %e,
-                    "Failed to publish to Redis stream"
-                );
-                WatchtowerError::PublicationError(format!("Redis XADD failed: {}", e))
-            })?;
-
-            info!(
-                stream = %stream_key,
-                event_id = %queued_event.id(),
-                event_type = %queued_event.event_type(),
-                "Event published to Redis stream"
-            );
+            match result {
+                Ok(_) => {
+                    self.circuit_breaker.record_success().await;
+                    info!(
+                        stream = %stream_key,
+                        event_id = %queued_event.id(),
+                        event_type = %queued_event.event_type(),
+                        "Event published to Redis stream"
+                    );
+                }
+                Err(e) => {
+                    self.circuit_breaker.record_failure().await;
+                    error!(
+                        stream = %stream_key,
+                        event_id = %queued_event.id(),
+                        error = %e,
+                        "Failed to publish to Redis stream"
+                    );
+                    return Err(WatchtowerError::PublicationError(format!("Redis XADD failed: {}", e)));
+                }
+            }
         }
 
         Ok(())
