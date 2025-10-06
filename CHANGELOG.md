@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Core traits: `Transport` and `Subscriber` for unified API
 - Backpressure control with configurable strategies (DropOldest, DropNewest, Block)
 - Dead Letter Queue (DLQ) support for all transports
+- Circuit Breaker pattern for fault tolerance across all transports
 
 #### Transports
 - **NATS**: Subject-based messaging with queue groups and consumer support
@@ -36,6 +37,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **WebSocket**: In-memory VecDeque with 10K event limit
 - **Webhook**: In-memory VecDeque with exponential backoff retry (5s delay)
 
+#### Circuit Breaker
+- **Core Implementation**: Three-state pattern (Closed, Open, HalfOpen) with configurable thresholds
+- **Configuration**:
+  - `failure_threshold`: Number of failures before opening circuit (default: 5)
+  - `timeout`: Recovery attempt delay (default: 60s)
+  - `success_threshold`: Successes needed to close from half-open (default: 2)
+- **Webhook**: Per-URL circuit breakers with isolated failure tracking
+- **WebSocket**: Connection-level circuit breaker with retry protection
+- **RabbitMQ**: Publish operation protection with confirmation tracking
+- **Redis Streams**: XADD operation protection with error isolation
+- **NATS**: Publish operation protection with subject-level monitoring
+- **Features**:
+  - Automatic state transitions based on success/failure patterns
+  - Fast-fail behavior when circuit is open
+  - Statistics API for monitoring (`circuit_breaker_stats()`)
+  - Prevents cascading failures and resource exhaustion
+  - Per-transport isolation (failures don't affect other transports)
+
 ### Transport-Specific Features
 
 #### NATS Transport
@@ -43,12 +62,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Subject-based routing with wildcard support
 - Queue groups for load balancing
 - DLQ with `dlq.*` subject pattern
+- Circuit breaker on publish operations with success/failure tracking
 
 #### Redis Streams Transport
 - Consumer groups with XREADGROUP
 - Stream max length configuration
 - ACK/NACK message acknowledgment
 - DLQ stream with `:dlq` suffix
+- Circuit breaker on XADD operations with error isolation
 
 #### RabbitMQ Transport
 - Exchange types: Direct, Topic, Fanout, Headers
@@ -58,6 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Persistent/non-persistent messages
 - ACK/NACK with requeue support
 - DLQ queue bound to dead letter exchange
+- Circuit breaker on publish operations with confirmation tracking
 
 #### WebSocket Transport
 - Auto-reconnect with retry attempts
@@ -65,6 +87,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Split read/write streams for bidirectional communication
 - Text and Binary message support
 - In-memory DLQ with size limits
+- Circuit breaker on connection attempts with retry protection
 
 #### Webhook Transport
 - HMAC-SHA256 signature verification
@@ -72,6 +95,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SSL verification toggle
 - Custom headers and timeout configuration
 - In-memory DLQ with retry logic
+- Per-URL circuit breakers with isolated failure tracking
 
 ### Project Structure
 - `core/`: Base traits, errors, events, and shared functionality
