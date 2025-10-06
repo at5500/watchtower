@@ -10,6 +10,7 @@
 mod config;
 mod subscriber;
 mod transport;
+pub mod prelude;
 
 pub use config::WebSocketConfig;
 pub use subscriber::WebSocketSubscriber;

@@ -7,7 +7,7 @@ use tokio::sync::RwLock;
 use crate::config::WebhookConfig;
 use watchtower_core::{Event, Subscriber, SubscriptionHandle, WatchtowerError};
 use watchtower_core::subscriber::EventCallback;
-use watchtower_core::{BackpressureConfig, BackpressureController, BackpressureStrategy};
+use watchtower_core::BackpressureController;
 
 use crate::client::WebhookClient;
 

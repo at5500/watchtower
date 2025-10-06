@@ -11,6 +11,7 @@ categories = ["web-programming", "network-programming"]
 resolver = "3"
 members = [
     "core",
+    "watchtower-derive",
     "transport/webhook",
     "transport/nats",
     "transport/redis",
@@ -22,6 +23,7 @@ members = [
 
 [dependencies]
 watchtower-core = { path = "./core" }
+watchtower-derive = { path = "./watchtower-derive" }
 watchtower-webhook = { path = "./transport/webhook" }
 watchtower-nats = { path = "./transport/nats" }
 watchtower-redis = { path = "./transport/redis" }
@@ -29,3 +31,9 @@ watchtower-rabbitmq = { path = "./transport/rabbitmq" }
 watchtower-websocket = { path = "./transport/websocket" }
 watchtower-unified = { path = "./unified" }
 watchtower-config = { path = "./config" }
+
+[dev-dependencies]
+tokio = { version = "1.35", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = "0.4"

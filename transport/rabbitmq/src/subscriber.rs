@@ -16,6 +16,7 @@ use watchtower_core::{Event, Subscriber, SubscriptionHandle, Transport, Watchtow
 /// Subscription metadata
 struct SubscriptionMeta {
     task_handle: tokio::task::JoinHandle<()>,
+    #[allow(dead_code)] // Stored for future use (logging, metrics, debugging)
     event_types: Vec<String>,
 }
 

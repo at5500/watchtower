@@ -125,3 +125,76 @@ impl Default for RabbitMQConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use watchtower_core::BackpressureStrategy;
+
+    #[test]
+    fn test_default_config() {
+        let config = RabbitMQConfig::default();
+
+        assert_eq!(config.url, "amqp://guest:guest@localhost:5672/%2f");
+        assert_eq!(config.exchange, "watchtower.events");
+        assert_eq!(config.exchange_type, ExchangeType::Topic);
+        assert_eq!(config.queue_prefix, "watchtower");
+        assert!(config.durable);
+        assert!(config.persistent);
+        assert!(!config.auto_delete);
+        assert_eq!(config.dead_letter_exchange, None);
+        assert_eq!(config.prefetch_count, 10);
+        assert_eq!(config.retry_attempts, 5);
+    }
+
+    #[test]
+    fn test_custom_config() {
+        let config = RabbitMQConfig {
+            url: "amqp://user:pass@remote:5672".to_string(),
+            exchange: "custom.events".to_string(),
+            exchange_type: ExchangeType::Fanout,
+            queue_prefix: "custom".to_string(),
+            durable: false,
+            persistent: false,
+            auto_delete: true,
+            dead_letter_exchange: Some("custom.dlx".to_string()),
+            message_ttl: 60000,
+            max_priority: 10,
+            prefetch_count: 20,
+            retry_attempts: 3,
+            retry_delay_seconds: 5,
+            backpressure: BackpressureConfig {
+                max_queue_size: 500,
+                strategy: BackpressureStrategy::DropNewest,
+                warning_threshold: 0.9,
+            },
+        };
+
+        assert_eq!(config.exchange, "custom.events");
+        assert_eq!(config.exchange_type, ExchangeType::Fanout);
+        assert!(!config.durable);
+        assert_eq!(config.dead_letter_exchange, Some("custom.dlx".to_string()));
+        assert_eq!(config.message_ttl, 60000);
+    }
+
+    #[test]
+    fn test_exchange_type_str() {
+        assert_eq!(ExchangeType::Direct.as_str(), "direct");
+        assert_eq!(ExchangeType::Topic.as_str(), "topic");
+        assert_eq!(ExchangeType::Fanout.as_str(), "fanout");
+        assert_eq!(ExchangeType::Headers.as_str(), "headers");
+    }
+
+    #[test]
+    fn test_config_serialization() {
+        let config = RabbitMQConfig::default();
+
+        let json = serde_json::to_string(&config).unwrap();
+        let deserialized: RabbitMQConfig = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(config.url, deserialized.url);
+        assert_eq!(config.exchange, deserialized.exchange);
+        assert_eq!(config.exchange_type, deserialized.exchange_type);
+        assert_eq!(config.queue_prefix, deserialized.queue_prefix);
+    }
+}

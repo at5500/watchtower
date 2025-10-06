@@ -1,0 +1,45 @@
+# WebSocket test server for Watchtower examples
+FROM rust:1.75-slim as builder
+
+WORKDIR /app
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create a new cargo project for the WebSocket server
+RUN cargo init --bin websocket-server
+WORKDIR /app/websocket-server
+
+# Copy manifests
+COPY docker/websocket-server/Cargo.toml ./Cargo.toml
+
+# Build dependencies (cached layer)
+RUN cargo build --release
+RUN rm src/*.rs
+
+# Copy source code
+COPY docker/websocket-server/src ./src
+
+# Build application
+RUN rm ./target/release/deps/websocket_server*
+RUN cargo build --release
+
+# Runtime stage
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy binary from builder
+COPY --from=builder /app/websocket-server/target/release/websocket-server /app/websocket-server
+
+EXPOSE 8080
+
+CMD ["/app/websocket-server"]

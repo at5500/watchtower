@@ -8,13 +8,14 @@ use tokio::sync::RwLock;
 use tracing::{error, info};
 use crate::config::NatsConfig;
 use watchtower_core::subscriber::EventCallback;
-use watchtower_core::{BackpressureController, BackpressureStrategy, Event, Subscriber, SubscriptionHandle, WatchtowerError};
+use watchtower_core::{BackpressureController, Event, Subscriber, SubscriptionHandle, WatchtowerError};
 
 use crate::client::NatsClient;
 
 /// Subscription metadata
 struct SubscriptionMeta {
     task_handle: tokio::task::JoinHandle<()>,
+    #[allow(dead_code)] // Stored for future use (logging, metrics, debugging)
     event_types: Vec<String>,
 }
 

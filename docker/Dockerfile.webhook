@@ -1,0 +1,46 @@
+# Webhook test receiver for Watchtower examples
+FROM rust:1.75-slim as builder
+
+WORKDIR /app
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create a new cargo project for the webhook receiver
+RUN cargo init --bin webhook-receiver
+WORKDIR /app/webhook-receiver
+
+# Copy manifests
+COPY docker/webhook-receiver/Cargo.toml ./Cargo.toml
+
+# Build dependencies (cached layer)
+RUN cargo build --release
+RUN rm src/*.rs
+
+# Copy source code
+COPY docker/webhook-receiver/src ./src
+
+# Build application
+RUN rm ./target/release/deps/webhook_receiver*
+RUN cargo build --release
+
+# Runtime stage
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy binary from builder
+COPY --from=builder /app/webhook-receiver/target/release/webhook-receiver /app/webhook-receiver
+
+EXPOSE 3000
+
+CMD ["/app/webhook-receiver"]

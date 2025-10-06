@@ -3,6 +3,7 @@
 use crate::config::BackpressureStrategy;
 use crate::event::Event;
 use crate::errors::WatchtowerError;
+use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tracing::{warn, debug};
@@ -43,6 +44,9 @@ pub struct BackpressureController {
     stats: Arc<RwLock<BackpressureStats>>,
     strategy: BackpressureStrategy,
     warning_threshold: f32,
+    // For DropOldest strategy: manual queue management
+    manual_queue: Option<Arc<RwLock<VecDeque<Event>>>>,
+    max_queue_size: usize,
 }
 
 impl BackpressureController {
@@ -52,18 +56,27 @@ impl BackpressureController {
         strategy: BackpressureStrategy,
         warning_threshold: f32,
     ) -> Self {
-        let (sender, receiver) = if max_queue_size > 0 {
-            mpsc::channel(max_queue_size)
+        let actual_max = if max_queue_size > 0 {
+            max_queue_size
         } else {
-            mpsc::channel(1000) // Default size for unlimited
+            1000 // Default size for unlimited
         };
+
+        let (sender, receiver) = mpsc::channel(actual_max);
 
         let stats = Arc::new(RwLock::new(BackpressureStats {
             total_received: 0,
             events_dropped: 0,
             current_queue_size: 0,
-            max_queue_size,
+            max_queue_size: actual_max,
         }));
+
+        // For DropOldest, use manual queue management
+        let manual_queue = if matches!(strategy, BackpressureStrategy::DropOldest) {
+            Some(Arc::new(RwLock::new(VecDeque::with_capacity(actual_max))))
+        } else {
+            None
+        };
 
         Self {
             sender,
@@ -71,6 +84,8 @@ impl BackpressureController {
             stats,
             strategy,
             warning_threshold,
+            manual_queue,
+            max_queue_size: actual_max,
         }
     }
 
@@ -132,35 +147,73 @@ impl BackpressureController {
                 }
             }
             BackpressureStrategy::DropOldest => {
-                // This requires a custom implementation with VecDeque
-                // For now, we'll use Block strategy as fallback
-                // TODO: Implement proper DropOldest with VecDeque
-                warn!("DropOldest strategy not fully implemented, using Block");
+                // Use manual queue management to drop oldest when full
+                if let Some(manual_queue) = &self.manual_queue {
+                    let mut queue = manual_queue.write().await;
 
-                self.sender
-                    .send(event)
-                    .await
-                    .map_err(|_| WatchtowerError::InternalError("Channel closed".to_string()))?;
+                    // If queue is full, drop the oldest event
+                    if queue.len() >= self.max_queue_size {
+                        if let Some(dropped_event) = queue.pop_front() {
+                            let mut stats = self.stats.write().await;
+                            stats.events_dropped += 1;
 
-                let mut stats = self.stats.write().await;
-                stats.current_queue_size = stats.current_queue_size.saturating_add(1);
+                            debug!(
+                                event_id = %dropped_event.id(),
+                                event_type = %dropped_event.event_type(),
+                                "Dropped oldest event due to backpressure (DropOldest strategy)"
+                            );
+                        }
+                    }
 
-                Ok(())
+                    // Add new event to the back
+                    queue.push_back(event);
+
+                    let mut stats = self.stats.write().await;
+                    stats.current_queue_size = queue.len();
+
+                    Ok(())
+                } else {
+                    // Fallback if manual_queue not initialized (shouldn't happen)
+                    warn!("DropOldest manual queue not initialized, using Block fallback");
+                    self.sender
+                        .send(event)
+                        .await
+                        .map_err(|_| WatchtowerError::InternalError("Channel closed".to_string()))?;
+
+                    let mut stats = self.stats.write().await;
+                    stats.current_queue_size = stats.current_queue_size.saturating_add(1);
+
+                    Ok(())
+                }
             }
         }
     }
 
     /// Receive an event from the queue
     pub async fn receive(&self) -> Option<Event> {
-        let mut receiver = self.receiver.write().await;
-        let event = receiver.recv().await;
+        // For DropOldest strategy, use manual queue
+        if let Some(manual_queue) = &self.manual_queue {
+            let mut queue = manual_queue.write().await;
+            let event = queue.pop_front();
 
-        if event.is_some() {
-            let mut stats = self.stats.write().await;
-            stats.current_queue_size = stats.current_queue_size.saturating_sub(1);
+            if event.is_some() {
+                let mut stats = self.stats.write().await;
+                stats.current_queue_size = queue.len();
+            }
+
+            event
+        } else {
+            // For other strategies, use mpsc channel
+            let mut receiver = self.receiver.write().await;
+            let event = receiver.recv().await;
+
+            if event.is_some() {
+                let mut stats = self.stats.write().await;
+                stats.current_queue_size = stats.current_queue_size.saturating_sub(1);
+            }
+
+            event
         }
-
-        event
     }
 
     /// Get current statistics

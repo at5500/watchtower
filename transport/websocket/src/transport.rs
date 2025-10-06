@@ -5,7 +5,7 @@ use futures_util::{stream::SplitStream, SinkExt, StreamExt};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::net::TcpStream;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 use tracing::{error, info, warn};
 
@@ -308,10 +308,17 @@ impl Transport for WebSocketTransport {
                 };
 
                 if let Some(dlq_entry) = entry {
+                    info!(
+                        event_id = %dlq_entry.event.id(),
+                        original_error = %dlq_entry.error,
+                        "Processing event from DLQ"
+                    );
+
                     if let Err(e) = callback(dlq_entry.event.clone()).await {
                         error!(
                             event_id = %dlq_entry.event.id(),
-                            error = %e,
+                            original_error = %dlq_entry.error,
+                            retry_error = %e,
                             "DLQ callback execution failed, re-queuing"
                         );
 

@@ -8,6 +8,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Integration Tests**: Comprehensive test suite for all transports
+  - `tests/nats_integration.rs`: Pub/sub, wildcard subscriptions, multiple subscribers
+  - `tests/redis_integration.rs`: Streams, consumer groups, persistence validation
+  - `tests/rabbitmq_integration.rs`: Pub/sub, topic routing, fanout exchanges
+  - `tests/websocket_integration.rs`: Bidirectional messaging, subscriptions, reconnection
+  - `tests/webhook_integration.rs`: Delivery, multiple endpoints, HMAC signatures, retry logic, event routing
+- **Advanced Examples**:
+  - `examples/multi_transport.rs`: Orchestrate 4 transports in a complete order workflow
+  - `examples/error_handling_dlq.rs`: DLQ usage, retry strategies, permanent vs transient errors
+  - `examples/circuit_breaker.rs`: State transitions, failure detection, recovery patterns
+  - `examples/backpressure.rs`: Demonstrate all 3 backpressure strategies with live metrics
+- **Documentation**:
+  - `tests/README.md`: Integration testing guide with setup instructions
+  - `examples/README.md`: Comprehensive examples guide with troubleshooting
+  - `ARCHITECTURE_ISSUES.md`: Detailed architecture analysis and improvement roadmap
+  - Added "Planned Features" section to main README.md
+
+### Fixed
+- **Critical**: Implemented DropOldest backpressure strategy (was falling back to Block)
+  - Added VecDeque-based manual queue management in `BackpressureController`
+  - Proper FIFO semantics: oldest events dropped when queue reaches capacity
+  - Statistics tracking for dropped events
+- Fixed unused `event_type` parameter in `Event::with_metadata()` - now properly overrides metadata
+- Fixed unused `error` field in DLQ entries - now logged for better debugging
+- Removed all unused imports flagged by clippy
+- Added documentation for intentionally stored fields (event_types in subscription metadata)
+
+### Changed
+- Updated Makefile with integration test commands for individual transports
+- Updated Makefile with commands for running new advanced examples
+- Enhanced DLQ logging to include original error information
+
+### Added
 - Initial release of watchtower notification library
 - Modular transport architecture with pluggable backends
 - Core traits: `Transport` and `Subscriber` for unified API

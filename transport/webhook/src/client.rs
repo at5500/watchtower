@@ -211,10 +211,17 @@ impl WebhookClient {
                 };
 
                 if let Some(dlq_entry) = entry {
+                    info!(
+                        event_id = %dlq_entry.event.id(),
+                        original_error = %dlq_entry.error,
+                        "Processing event from DLQ"
+                    );
+
                     if let Err(e) = callback(dlq_entry.event.clone()).await {
                         error!(
                             event_id = %dlq_entry.event.id(),
-                            error = %e,
+                            original_error = %dlq_entry.error,
+                            retry_error = %e,
                             "DLQ callback execution failed, re-queuing with exponential backoff"
                         );
 

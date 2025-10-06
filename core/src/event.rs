@@ -36,6 +36,10 @@ impl EventMetadata {
         self
     }
 
+    pub fn set_source(&mut self, source: impl Into<String>) {
+        self.source = Some(source.into());
+    }
+
     pub fn with_correlation_id(mut self, correlation_id: Uuid) -> Self {
         self.correlation_id = Some(correlation_id);
         self
@@ -59,7 +63,9 @@ impl Event {
         }
     }
 
-    pub fn with_metadata(metadata: EventMetadata, payload: Value) -> Self {
+    pub fn with_metadata(event_type: impl Into<String>, payload: Value, mut metadata: EventMetadata) -> Self {
+        // Override event_type in metadata with the provided one
+        metadata.event_type = event_type.into();
         Self { metadata, payload }
     }
 

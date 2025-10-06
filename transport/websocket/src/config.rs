@@ -81,3 +81,64 @@ impl Default for WebSocketConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use watchtower_core::BackpressureStrategy;
+
+    #[test]
+    fn test_default_config() {
+        let config = WebSocketConfig::default();
+
+        assert_eq!(config.url, "ws://localhost:8080/events");
+        assert!(config.auto_reconnect);
+        assert_eq!(config.retry_attempts, 5);
+        assert_eq!(config.retry_delay_seconds, 2);
+        assert_eq!(config.ping_interval_seconds, 30);
+        assert_eq!(config.pong_timeout_seconds, 10);
+        assert_eq!(config.max_message_size, 64 * 1024 * 1024);
+        assert!(config.headers.is_empty());
+    }
+
+    #[test]
+    fn test_custom_config() {
+        let config = WebSocketConfig {
+            url: "wss://remote:8080/custom".to_string(),
+            auto_reconnect: false,
+            retry_attempts: 10,
+            retry_delay_seconds: 5,
+            ping_interval_seconds: 60,
+            pong_timeout_seconds: 20,
+            max_message_size: 10 * 1024 * 1024,
+            headers: vec![
+                ("Authorization".to_string(), "Bearer token".to_string()),
+                ("X-Custom".to_string(), "value".to_string()),
+            ],
+            backpressure: BackpressureConfig {
+                max_queue_size: 200,
+                strategy: BackpressureStrategy::Block,
+                warning_threshold: 0.7,
+            },
+        };
+
+        assert_eq!(config.url, "wss://remote:8080/custom");
+        assert!(!config.auto_reconnect);
+        assert_eq!(config.retry_attempts, 10);
+        assert_eq!(config.max_message_size, 10 * 1024 * 1024);
+        assert_eq!(config.headers.len(), 2);
+    }
+
+    #[test]
+    fn test_config_serialization() {
+        let config = WebSocketConfig::default();
+
+        let json = serde_json::to_string(&config).unwrap();
+        let deserialized: WebSocketConfig = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(config.url, deserialized.url);
+        assert_eq!(config.auto_reconnect, deserialized.auto_reconnect);
+        assert_eq!(config.retry_attempts, deserialized.retry_attempts);
+        assert_eq!(config.max_message_size, deserialized.max_message_size);
+    }
+}

@@ -3003,8 +3003,13 @@ dependencies = [
 name = "watchtower"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "tokio",
  "watchtower-config",
  "watchtower-core",
+ "watchtower-derive",
  "watchtower-nats",
  "watchtower-rabbitmq",
  "watchtower-redis",
@@ -3033,6 +3038,15 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "watchtower-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

@@ -1,0 +1,107 @@
+version: '3.8'
+
+services:
+  # NATS message broker
+  nats:
+    image: nats:2.10-alpine
+    container_name: watchtower-nats
+    ports:
+      - "4222:4222"  # Client connections
+      - "8222:8222"  # HTTP monitoring
+      - "6222:6222"  # Cluster connections
+    command: [
+      "-js",           # Enable JetStream
+      "-m", "8222"     # Enable monitoring on port 8222
+    ]
+    networks:
+      - watchtower
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for Redis Streams
+  redis:
+    image: redis:7-alpine
+    container_name: watchtower-redis
+    ports:
+      - "6379:6379"
+    command: [
+      "redis-server",
+      "--appendonly", "yes",
+      "--maxmemory", "256mb",
+      "--maxmemory-policy", "allkeys-lru"
+    ]
+    volumes:
+      - redis-data:/data
+    networks:
+      - watchtower
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # RabbitMQ message broker
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: watchtower-rabbitmq
+    ports:
+      - "5672:5672"   # AMQP port
+      - "15672:15672" # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_DEFAULT_VHOST: /
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - watchtower
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # WebSocket server for testing
+  websocket-server:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.websocket
+    container_name: watchtower-websocket
+    ports:
+      - "8080:8080"
+    networks:
+      - watchtower
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Webhook receiver for testing
+  webhook-receiver:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.webhook
+    container_name: watchtower-webhook
+    ports:
+      - "3000:3000"
+    environment:
+      WEBHOOK_SECRET: test-secret-key
+    networks:
+      - watchtower
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  watchtower:
+    driver: bridge
+
+volumes:
+  redis-data:
+  rabbitmq-data:

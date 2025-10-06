@@ -250,7 +250,7 @@ impl Transport for RedisTransport {
         tokio::spawn(async move {
             loop {
                 let opts = StreamReadOptions::default()
-                    .group(&dlq_group, &format!("{}_dlq_consumer", &dlq_group))
+                    .group(&dlq_group, format!("{}_dlq_consumer", &dlq_group))
                     .count(10)
                     .block(1000);
 

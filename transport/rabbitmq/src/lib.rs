@@ -13,6 +13,7 @@
 mod config;
 mod subscriber;
 mod transport;
+pub mod prelude;
 
 pub use config::{ExchangeType, RabbitMQConfig};
 pub use subscriber::RabbitMQSubscriber;
