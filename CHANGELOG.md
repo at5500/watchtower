@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Architecture Documentation**: Added visual diagrams to README.md
+  - ASCII diagram showing layered architecture (Application, Core, Transport, External Services)
+  - Mermaid flowchart diagram showing component dependencies
+  - Crate organization table with features for each transport
+  - Architecture layers description
 - **Integration Tests**: Comprehensive test suite for all transports
   - `tests/nats_integration.rs`: Pub/sub, wildcard subscriptions, multiple subscribers
   - `tests/redis_integration.rs`: Streams, consumer groups, persistence validation

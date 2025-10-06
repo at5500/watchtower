@@ -17,6 +17,103 @@
 
 Watchtower is a modular event notification system designed for distributed applications. It provides a unified API for publishing and subscribing to events across multiple transport protocols, with built-in support for fault tolerance, backpressure control, and observability.
 
+## Architecture
+
+Watchtower follows a layered architecture with pluggable transport backends and shared fault-tolerance components:
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                          WATCHTOWER                            │
+│                      (Application Layer)                       │
+│                                                                │
+│  • Unified Event API            • Transport Selection          │
+│  • Publisher/Subscriber         • Configuration                │
+│  • Application Logic            • Event Routing                │
+└───────────────────────────────┬────────────────────────────────┘
+                                │
+┌───────────────────────────────▼────────────────────────────────┐
+│                         CORE LAYER                             │
+│                    (Shared Components)                         │
+│                                                                │
+│  • Event Abstraction            • Circuit Breaker              │
+│  • Subscriber/Transport Traits  • Backpressure Controller      │
+│  • Error Handling               • Dead Letter Queue            │
+│  • Statistics & Health Checks   • Observability                │
+└──────┬────────────────┬────────────┬────────────┬──────────────┘
+       │                │            │            │
+┌──────▼──────┐  ┌──────▼──────┐  ┌─▼─────┐  ┌──▼────┐  ┌───▼────┐
+│    NATS     │  │    REDIS    │  │RABBIT │  │WEBSKT │  │WEBHOOK │
+│  TRANSPORT  │  │  TRANSPORT  │  │  MQ   │  │TRANSP │  │TRANSP  │
+│             │  │             │  │TRANSP │  │       │  │        │
+│ • Subjects  │  │ • Streams   │  │• AMQP │  │• WS   │  │• HTTP  │
+│ • Queues    │  │ • Groups    │  │• DLX  │  │• Bi-  │  │• HMAC  │
+│ • Wildcard  │  │ • ACK/NACK  │  │• TTL  │  │  Dir  │  │• Retry │
+└─────────────┘  └─────────────┘  └───────┘  └───────┘  └────────┘
+       │                │            │            │           │
+       └────────────────┴────────────┴────────────┴───────────┘
+                                │
+                    ┌───────────▼──────────┐
+                    │  External Services   │
+                    │  • NATS Server       │
+                    │  • Redis Server      │
+                    │  • RabbitMQ Broker   │
+                    │  • WebSocket Server  │
+                    │  • HTTP Endpoints    │
+                    └──────────────────────┘
+```
+
+### Component Dependencies
+
+```mermaid
+%%{init: {'theme':'base', 'themeVariables': { 'primaryColor':'#fff','primaryTextColor':'#000','primaryBorderColor':'#000','lineColor':'#000','secondaryColor':'#fff','tertiaryColor':'#fff'}}}%%
+flowchart LR
+    APP["🔧 Your Application"]
+
+    subgraph CORE["📦 watchtower-core"]
+        direction TB
+        EVENTS["Event & Traits"]
+        FAULT["Circuit Breaker<br/>Backpressure<br/>Dead Letter Queue"]
+    end
+
+    subgraph TRANSPORTS["🚀 Transports"]
+        direction TB
+        T1["NATS"]
+        T2["Redis"]
+        T3["RabbitMQ"]
+        T4["WebSocket"]
+        T5["Webhook"]
+    end
+
+    APP --> CORE
+    APP --> TRANSPORTS
+    TRANSPORTS --> CORE
+```
+
+### Architecture Layers
+
+- **Application Level**: Your code using Watchtower's unified event API
+- **Core Level**: Shared components used by all transports
+  - `Event` - Event abstraction and metadata
+  - `Subscriber/Transport` - Unified traits for all transports
+  - `Circuit Breaker` - Fault tolerance and failure prevention
+  - `Backpressure Controller` - Flow control and queue management
+  - `Dead Letter Queue` - Failed event handling
+- **Transport Level**: Protocol-specific implementations
+  - Each transport implements core traits independently
+  - All transports share the same fault-tolerance components
+  - Pluggable architecture - use one or many transports
+
+### Crate Organization
+
+| Crate | Level | Purpose | Key Features |
+|-------|-------|---------|--------------|
+| **watchtower-core** | Core | Shared abstractions | • Event model<br>• Traits (Subscriber, Transport)<br>• Circuit Breaker<br>• Backpressure<br>• DLQ |
+| **watchtower-nats** | Transport | NATS messaging | • Subject routing<br>• Queue groups<br>• Wildcard subscriptions |
+| **watchtower-redis** | Transport | Redis Streams | • Consumer groups<br>• Stream persistence<br>• ACK/NACK |
+| **watchtower-rabbitmq** | Transport | AMQP messaging | • Exchange routing<br>• Dead letter exchange<br>• Message TTL |
+| **watchtower-websocket** | Transport | WebSocket | • Bidirectional streams<br>• Auto-reconnect<br>• In-memory DLQ |
+| **watchtower-webhook** | Transport | HTTP notifications | • HMAC signatures<br>• Retry logic<br>• Per-URL circuit breakers |
+
 ## Features
 
 - 🚀 **Multiple Transport Backends**: NATS, Redis Streams, RabbitMQ, WebSocket, Webhook
