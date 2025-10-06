@@ -22,44 +22,45 @@ Watchtower is a modular event notification system designed for distributed appli
 Watchtower follows a layered architecture with pluggable transport backends and shared fault-tolerance components:
 
 ```
-┌────────────────────────────────────────────────────────────────┐
-│                          WATCHTOWER                            │
-│                      (Application Layer)                       │
-│                                                                │
-│  • Unified Event API            • Transport Selection          │
-│  • Publisher/Subscriber         • Configuration                │
-│  • Application Logic            • Event Routing                │
-└───────────────────────────────┬────────────────────────────────┘
-                                │
-┌───────────────────────────────▼────────────────────────────────┐
-│                         CORE LAYER                             │
-│                    (Shared Components)                         │
-│                                                                │
-│  • Event Abstraction            • Circuit Breaker              │
-│  • Subscriber/Transport Traits  • Backpressure Controller      │
-│  • Error Handling               • Dead Letter Queue            │
-│  • Statistics & Health Checks   • Observability                │
-└──────┬────────────────┬────────────┬────────────┬──────────────┘
-       │                │            │            │
-┌──────▼──────┐  ┌──────▼──────┐  ┌─▼─────┐  ┌──▼────┐  ┌───▼────┐
-│    NATS     │  │    REDIS    │  │RABBIT │  │WEBSKT │  │WEBHOOK │
-│  TRANSPORT  │  │  TRANSPORT  │  │  MQ   │  │TRANSP │  │TRANSP  │
-│             │  │             │  │TRANSP │  │       │  │        │
-│ • Subjects  │  │ • Streams   │  │• AMQP │  │• WS   │  │• HTTP  │
-│ • Queues    │  │ • Groups    │  │• DLX  │  │• Bi-  │  │• HMAC  │
-│ • Wildcard  │  │ • ACK/NACK  │  │• TTL  │  │  Dir  │  │• Retry │
-└─────────────┘  └─────────────┘  └───────┘  └───────┘  └────────┘
-       │                │            │            │           │
-       └────────────────┴────────────┴────────────┴───────────┘
-                                │
-                    ┌───────────▼──────────┐
-                    │  External Services   │
-                    │  • NATS Server       │
-                    │  • Redis Server      │
-                    │  • RabbitMQ Broker   │
-                    │  • WebSocket Server  │
-                    │  • HTTP Endpoints    │
-                    └──────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────┐
+│                               WATCHTOWER                                  │
+│                           (Application Layer)                             │
+│                                                                           │
+│  • Unified Event API                • Transport Selection                 │
+│  • Publisher/Subscriber             • Configuration                       │
+│  • Application Logic                • Event Routing                       │
+└────────────────────────────────────┬──────────────────────────────────────┘
+                                     │
+┌────────────────────────────────────▼──────────────────────────────────────┐
+│                               CORE LAYER                                  │
+│                           (Shared Components)                             │
+│                                                                           │
+│  • Event Abstraction                • Circuit Breaker                     │
+│  • Subscriber/Transport Traits      • Backpressure Controller             │
+│  • Error Handling                   • Dead Letter Queue                   │
+│  • Statistics & Health Checks       • Observability                       │
+└──────┬────────────────┬───────────────┬──────────────┬──────────────┬─────┘
+       │                │               │              │              │
+┌──────▼──────┐  ┌──────▼──────┐  ┌─────▼─────┐  ┌─────▼─────┐  ┌─────▼─────┐
+│    NATS     │  │    REDIS    │  │ RABBIT MQ │  │ WEBSOCKET │  │ WEBHOOK   │
+│  TRANSPORT  │  │  TRANSPORT  │  │ TRANSPORT │  │ TRANSPORT │  │ TRANSPORT │
+│             │  │             │  │           │  │           │  │           │
+│ • Subjects  │  │ • Streams   │  │ • AMQP    │  │ • WS      │  │ • HTTP    │
+│ • Queues    │  │ • Groups    │  │ • DLX     │  │ • Bi-Dir  │  │ • HMAC    │
+│ • Wildcard  │  │ • ACK/NACK  │  │ • TTL     │  │           │  │ • Retry   │
+└─────────────┘  └─────────────┘  └───────────┘  └───────────┘  └───────────┘
+       │                │               │              │              │
+       └────────────────┴───────────────┴──────────────┴──────────────┘
+                                        │
+                            ┌───────────▼──────────┐
+                            │  External Services   │
+                            │                      │
+                            │  • NATS Server       │
+                            │  • Redis Server      │
+                            │  • RabbitMQ Broker   │
+                            │  • WebSocket Server  │
+                            │  • HTTP Endpoints    │
+                            └──────────────────────┘
 ```
 
 ### Component Dependencies
