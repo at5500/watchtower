@@ -3,10 +3,12 @@
 use crate::config::BackpressureStrategy;
 use crate::event::Event;
 use crate::errors::WatchtowerError;
+#[cfg(feature = "debug-logging")]
+use crate::debug_log;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
-use tracing::{warn, debug};
+use tracing::warn;
 
 /// Backpressure statistics
 #[derive(Debug, Clone, Default)]
@@ -127,13 +129,14 @@ impl BackpressureController {
                         stats.current_queue_size = stats.current_queue_size.saturating_add(1);
                         Ok(())
                     }
-                    Err(mpsc::error::TrySendError::Full(dropped_event)) => {
+                    Err(mpsc::error::TrySendError::Full(_dropped_event)) => {
                         let mut stats = self.stats.write().await;
                         stats.events_dropped += 1;
 
-                        debug!(
-                            event_id = %dropped_event.id(),
-                            event_type = %dropped_event.event_type(),
+                        #[cfg(feature = "debug-logging")]
+                        debug_log!(
+                            event_id = %_dropped_event.id(),
+                            event_type = %_dropped_event.event_type(),
                             "Event dropped due to backpressure (DropNewest strategy)"
                         );
 
@@ -153,13 +156,14 @@ impl BackpressureController {
 
                     // If queue is full, drop the oldest event
                     if queue.len() >= self.max_queue_size {
-                        if let Some(dropped_event) = queue.pop_front() {
+                        if let Some(_dropped_event) = queue.pop_front() {
                             let mut stats = self.stats.write().await;
                             stats.events_dropped += 1;
 
-                            debug!(
-                                event_id = %dropped_event.id(),
-                                event_type = %dropped_event.event_type(),
+                            #[cfg(feature = "debug-logging")]
+                            debug_log!(
+                                event_id = %_dropped_event.id(),
+                                event_type = %_dropped_event.event_type(),
                                 "Dropped oldest event due to backpressure (DropOldest strategy)"
                             );
                         }

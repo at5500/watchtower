@@ -4,11 +4,11 @@ use futures_util::{SinkExt, StreamExt};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, RwLock};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use axum::extract::ws::{Message, WebSocket};
-use watchtower_core::Event;
+use watchtower_core::{debug_log, Event};
 
 /// Client identifier
 pub type ClientId = Uuid;
@@ -137,7 +137,7 @@ impl ConnectionManager {
         for (client_id, handle) in connections.iter() {
             if handle.sender.send(message.clone()).is_ok() {
                 sent_count += 1;
-                debug!(
+                debug_log!(
                     client_id = %client_id,
                     event_type = %event.event_type(),
                     "Event sent to client"
@@ -175,7 +175,7 @@ impl ConnectionManager {
                 .send(Message::Text(json))
                 .map_err(|e| format!("Failed to send to client: {}", e))?;
 
-            debug!(
+            debug_log!(
                 client_id = %client_id,
                 event_type = %event.event_type(),
                 "Event sent to specific client"
@@ -252,21 +252,25 @@ pub async fn handle_websocket_connection(
             match msg_result {
                 Ok(msg) => match msg {
                     Message::Text(text) => {
-                        debug!(client_id = %client_id, "Received text message");
+                        debug_log!(client_id = %client_id, "Received text message");
                         // TODO: Handle incoming messages (e.g., subscription filters)
-                        if let Ok(event) = serde_json::from_str::<Event>(&text) {
+                        #[cfg(feature = "debug-logging")]
+                        if let Ok(_event) = serde_json::from_str::<Event>(&text) {
                             // Client sending event back? Echo or process as needed
-                            debug!(client_id = %client_id, event_type = %event.event_type(), "Received event from client");
+                            debug_log!(client_id = %client_id, event_type = %_event.event_type(), "Received event from client");
                         }
+                        #[cfg(not(feature = "debug-logging"))]
+                        let _ = text; // Suppress unused variable warning
                     }
-                    Message::Binary(data) => {
-                        debug!(client_id = %client_id, size = data.len(), "Received binary message");
+                    Message::Binary(_data) => {
+                        #[cfg(feature = "debug-logging")]
+                        debug_log!(client_id = %client_id, size = _data.len(), "Received binary message");
                     }
                     Message::Ping(_) => {
-                        debug!(client_id = %client_id, "Received ping");
+                        debug_log!(client_id = %client_id, "Received ping");
                     }
                     Message::Pong(_) => {
-                        debug!(client_id = %client_id, "Received pong");
+                        debug_log!(client_id = %client_id, "Received pong");
                     }
                     Message::Close(frame) => {
                         info!(client_id = %client_id, frame = ?frame, "Client initiated close");
@@ -286,11 +290,11 @@ pub async fn handle_websocket_connection(
     // Wait for either task to complete
     tokio::select! {
         _ = &mut send_task => {
-            debug!(client_id = %client_id, "Send task completed");
+            debug_log!(client_id = %client_id, "Send task completed");
             recv_task.abort();
         }
         _ = &mut recv_task => {
-            debug!(client_id = %client_id, "Receive task completed");
+            debug_log!(client_id = %client_id, "Receive task completed");
             send_task.abort();
         }
     }

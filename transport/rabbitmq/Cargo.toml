@@ -3,6 +3,10 @@ name = "watchtower-rabbitmq"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+debug-logging = []
+
 [dependencies]
 watchtower-core = { path = "../../core" }
 lapin = "2.3"

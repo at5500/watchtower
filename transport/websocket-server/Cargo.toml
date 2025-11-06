@@ -5,6 +5,10 @@ edition = "2024"
 description = "WebSocket server transport for Watchtower"
 license = "MIT"
 
+[features]
+default = []
+debug-logging = []
+
 [dependencies]
 watchtower-core = { path = "../../core" }
 tokio = { version = "1", features = ["full"] }
