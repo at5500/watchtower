@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **WebSocket Server Transport**: New server-side WebSocket transport implementation
+  - `transport/websocket-server/`: Broadcast events to multiple connected WebSocket clients
+  - Axum-based WebSocket server with connection management
+  - Support for up to 1000+ concurrent client connections
+  - Broadcast events to all connected clients simultaneously
+  - Client metadata tracking and connection statistics
+  - Configurable ping/pong keepalive mechanism
+  - Built-in health check endpoints
+  - Ready-to-use Axum handlers for easy integration
+  - `examples/websocket-server/`: Complete working example with periodic event broadcasting
+  - Added to workspace members and dependency tree
 - **Architecture Documentation**: Added visual diagrams to README.md
   - ASCII diagram showing layered architecture (Application, Core, Transport, External Services)
   - Mermaid flowchart diagram showing component dependencies
@@ -58,6 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Redis Streams**: XREADGROUP consumer groups with ACK/NACK
 - **RabbitMQ**: AMQP with exchanges, queues, DLX, and prefetch control
 - **WebSocket**: Bidirectional communication with auto-reconnect and split streams
+- **WebSocket Server**: Server-side WebSocket broadcasting to multiple connected clients
 - **Webhook**: HTTP-based notifications with HMAC signatures and retry logic
 
 #### Features
@@ -127,6 +139,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - In-memory DLQ with size limits
 - Circuit breaker on connection attempts with retry protection
 
+#### WebSocket Server Transport
+- Axum-based WebSocket server implementation
+- Broadcast events to multiple connected clients
+- Connection manager with client tracking
+- Configurable max connections and broadcast buffer
+- Ping interval configuration for keepalive
+- Client metadata support
+- Active connections monitoring
+- Health check API
+
 #### Webhook Transport
 - HMAC-SHA256 signature verification
 - Retry with exponential backoff
@@ -141,7 +163,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `transport/nats/`: NATS transport implementation
 - `transport/redis/`: Redis Streams transport implementation
 - `transport/rabbitmq/`: RabbitMQ transport implementation
-- `transport/websocket/`: WebSocket transport implementation
+- `transport/websocket/`: WebSocket client transport implementation
+- `transport/websocket-server/`: WebSocket server transport implementation
 - `transport/webhook/`: Webhook transport implementation
 - `unified/`: Convenience wrapper for all transports
 

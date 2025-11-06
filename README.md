@@ -112,12 +112,13 @@ flowchart LR
 | **watchtower-nats** | Transport | NATS messaging | • Subject routing<br>• Queue groups<br>• Wildcard subscriptions |
 | **watchtower-redis** | Transport | Redis Streams | • Consumer groups<br>• Stream persistence<br>• ACK/NACK |
 | **watchtower-rabbitmq** | Transport | AMQP messaging | • Exchange routing<br>• Dead letter exchange<br>• Message TTL |
-| **watchtower-websocket** | Transport | WebSocket | • Bidirectional streams<br>• Auto-reconnect<br>• In-memory DLQ |
+| **watchtower-websocket** | Transport | WebSocket client | • Bidirectional streams<br>• Auto-reconnect<br>• In-memory DLQ |
+| **watchtower-websocket-server** | Transport | WebSocket server | • Broadcast to clients<br>• Connection management<br>• Axum integration |
 | **watchtower-webhook** | Transport | HTTP notifications | • HMAC signatures<br>• Retry logic<br>• Per-URL circuit breakers |
 
 ## Features
 
-- 🚀 **Multiple Transport Backends**: NATS, Redis Streams, RabbitMQ, WebSocket, Webhook
+- 🚀 **Multiple Transport Backends**: NATS, Redis Streams, RabbitMQ, WebSocket, WebSocket Server, Webhook
 - 🔄 **Bidirectional Messaging**: Full publish/subscribe support for applicable transports
 - 🛡️ **Fault Tolerance**: Circuit breaker pattern prevents cascading failures
 - 📊 **Backpressure Control**: Configurable strategies (DropOldest, DropNewest, Block)
@@ -170,20 +171,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Transport Comparison
 
-| Feature | NATS | Redis | RabbitMQ | WebSocket | Webhook |
-|---------|:----:|:-----:|:--------:|:---------:|:-------:|
-| Publish | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Subscribe | ✅ | ✅ | ✅ | ✅ | ❌ |
-| Persistence | ❌ | ✅ | ✅ | ❌ | ❌ |
-| Queue Groups | ✅ | ✅ | ✅ | ❌ | ❌ |
-| Circuit Breaker | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Dead Letter Queue | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Feature | NATS | Redis | RabbitMQ | WebSocket | WS Server | Webhook |
+|---------|:----:|:-----:|:--------:|:---------:|:---------:|:-------:|
+| Publish | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Subscribe | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Persistence | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Queue Groups | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Multi-client | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ |
+| Circuit Breaker | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Dead Letter Queue | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 **Choose:**
 - **NATS** for lightweight, high-performance pub/sub
 - **Redis** for persistent streams with consumer groups
 - **RabbitMQ** for advanced routing and guaranteed delivery
-- **WebSocket** for real-time bidirectional communication
+- **WebSocket** for real-time bidirectional client communication
+- **WebSocket Server** for broadcasting events to multiple connected clients
 - **Webhook** for HTTP-based integrations
 
 ## Documentation
@@ -233,6 +236,7 @@ Check the [examples](examples/) directory:
 - `redis_streams.rs` - Redis Streams with consumer groups
 - `rabbitmq_dlx.rs` - RabbitMQ with dead letter exchange
 - `websocket_bidirectional.rs` - WebSocket bidirectional messaging
+- `websocket-server/` - WebSocket server broadcasting to multiple clients
 - `webhook_signatures.rs` - Webhook with HMAC signatures
 
 ## Planned Features

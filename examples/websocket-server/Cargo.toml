@@ -1,0 +1,13 @@
+[[example]]
+name = "websocket-server"
+path = "main.rs"
+
+[dependencies]
+watchtower-core = { path = "../../core" }
+watchtower-websocket-server = { path = "../../transport/websocket-server" }
+axum = { version = "0.7", features = ["ws"] }
+tokio = { version = "1", features = ["full"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+chrono = "0.4"
