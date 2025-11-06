@@ -169,6 +169,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+### Using the Unified API
+
+Watchtower provides convenient re-exports at the crate root and in the prelude module:
+
+```rust
+// Using root-level exports
+use watchtower::{Event, NatsSubscriber, NatsConfig};
+use watchtower::{WebSocketServerTransport, websocket_handler};
+
+// Or using prelude for everything
+use watchtower::prelude::*;
+```
+
+All transport components including WebSocket Server are available from both the main crate and individual transport crates.
+
 ## Transport Comparison
 
 | Feature | NATS | Redis | RabbitMQ | WebSocket | WS Server | Webhook |

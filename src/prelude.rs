@@ -14,3 +14,7 @@ pub use watchtower_redis::{RedisConfig, RedisSubscriber, RedisTransport};
 pub use watchtower_unified::UnifiedNotifier;
 pub use watchtower_webhook::{WebhookClient, WebhookConfig, WebhookSubscriber};
 pub use watchtower_websocket::{WebSocketConfig, WebSocketSubscriber, WebSocketTransport};
+pub use watchtower_websocket_server::{
+    ClientId, ClientMetadata, ConnectionManager, WebSocketServerConfig, WebSocketServerTransport,
+    websocket_handler, websocket_handler_with_metadata,
+};
