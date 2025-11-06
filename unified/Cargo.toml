@@ -3,6 +3,17 @@ name = "watchtower-unified"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+debug-logging = [
+    "watchtower-core/debug-logging",
+    "watchtower-webhook/debug-logging",
+    "watchtower-nats/debug-logging",
+    "watchtower-redis/debug-logging",
+    "watchtower-rabbitmq/debug-logging",
+    "watchtower-websocket/debug-logging",
+]
+
 [dependencies]
 watchtower-core = { path = "../core" }
 watchtower-config = { path = "../config" }
